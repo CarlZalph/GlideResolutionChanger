@@ -7,8 +7,11 @@ http://www.svenswrapper.de/english/downloads.html
 
 This software existing doesn't mean that Sven endorses or promotes this software.
 
-This software assumes you are using version 1.4e as of this time.
+This software supports the following versions for:
 
+GlideDLL: 1.4e (1.4.4.21), D2SE's 1.4e (1.4.6.1)
+
+GlideEXE: 1.4e (2.0.1.24), D2SE's 1.4e (2.0.1.24)
 
 # How to use
 Place GlideResolutionChanger.exe in the same folder as the install location for the glide wrapper.
