@@ -38,7 +38,7 @@ static size_t Offset_dll_height = 0x0;
 static size_t Offset_exe = 0x0;
 static size_t Size_exe = 0;
 
-static bool GetOffsetsForFile(const char *filename, struct version *output) // WinAPI syntax and naming schemes.
+static bool GetVersionForFile(const char *filename, struct version *output) // WinAPI syntax and naming schemes.
 {
     bool retval = false;
     DWORD versionhandle = 0;
@@ -47,46 +47,46 @@ static bool GetOffsetsForFile(const char *filename, struct version *output) // W
     {
         printf("Err: GetOffsetsForGlide failed at GetFileVersionInfoSize. %lu\n", GetLastError());
         printf("   : https://docs.microsoft.com/en-us/windows/win32/debug/system-error-codes\n"); // TODO: API lookup error code handling.
-        goto GetOffsetsForGlide_dead;
+        goto GetVersionForFile_dead;
     }
     LPSTR versionbuffer = malloc(versionsize);
     if(versionbuffer == NULL)
     {
         printf("Err: GetOffsetsForGlide failed at malloc for versionbuffer with %lu bytes.\n", versionsize);
-        goto GetOffsetsForGlide_dead;
+        goto GetVersionForFile_dead;
     }
     if(GetFileVersionInfo(filename, versionhandle, versionsize, versionbuffer) == FALSE)
     {
         printf("Err: GetOffsetsForGlide failed at GetFileVersionInfo.\n");
-        goto GetOffsetsForGlide_buffer;
+        goto GetVersionForFile_buffer;
     }
     LPBYTE buffer = NULL;
     UINT buffersize = 0;
     if(VerQueryValue(versionbuffer, "\\", (LPVOID *)&buffer, &buffersize) == FALSE)
     {
         printf("Err: GetOffsetsForGlide failed at VerQueryValue.\n");
-        goto GetOffsetsForGlide_buffer;
+        goto GetVersionForFile_buffer;
     }
     if(buffersize == 0)
     {
         printf("Err: GetOffsetsForGlide failed at VerQueryValue, version data size is zero.\n");
-        goto GetOffsetsForGlide_buffer;
+        goto GetVersionForFile_buffer;
     }
     VS_FIXEDFILEINFO *versioninfo = (VS_FIXEDFILEINFO *)buffer;
     if(versioninfo->dwSignature != 0xFEEF04BD)
     {
         printf("Err: GetOffsetsForGlide failed at VerQueryValue, version info signature is not valid. %08X\n", versioninfo->dwSignature);
-        goto GetOffsetsForGlide_buffer;
+        goto GetVersionForFile_buffer;
     }
     output->v1 = HIWORD(versioninfo->dwFileVersionMS);
     output->v2 = LOWORD(versioninfo->dwFileVersionMS);
     output->v3 = HIWORD(versioninfo->dwFileVersionLS);
     output->v4 = LOWORD(versioninfo->dwFileVersionLS);
     retval = true;
-GetOffsetsForGlide_buffer:
+GetVersionForFile_buffer:
     free(versionbuffer);
     versionbuffer = NULL;
-GetOffsetsForGlide_dead:
+GetVersionForFile_dead:
     return retval;
 }
 static bool GetOffsets()
@@ -94,7 +94,7 @@ static bool GetOffsets()
     bool gooddll = false;
     bool goodexe = false;
     struct version v;
-    if(GetOffsetsForFile(GLIDEDLL, &v) == false)
+    if(GetVersionForFile(GLIDEDLL, &v) == false)
     {
         goto GetOffsets_dead;
     }
@@ -117,7 +117,7 @@ static bool GetOffsets()
         printf("Err: GetOffsets failed for DLL, unknown version.\n");
         printf("   : %d.%d.%d.%d\n", v.v1, v.v2, v.v3, v.v4);
     }
-    if(GetOffsetsForFile(GLIDEEXE, &v) == false)
+    if(GetVersionForFile(GLIDEEXE, &v) == false)
     {
         goto GetOffsets_dead;
     }
