@@ -20,10 +20,123 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-static const size_t Offset_dll_width = 0x7DF8;
-static const size_t Offset_dll_height = 0x7E04;
-static const size_t Offset_exe = 0x1890A;
-static const size_t Size_exe = 10;
+#include <windows.h>
+
+#define GLIDEDLL "glide3x.dll"
+#define GLIDEEXE "glide-init.exe"
+
+struct version
+{
+    uint16_t v1;
+    uint16_t v2;
+    uint16_t v3;
+    uint16_t v4;
+};
+
+static size_t Offset_dll_width = 0x0;
+static size_t Offset_dll_height = 0x0;
+static size_t Offset_exe = 0x0;
+static size_t Size_exe = 0;
+
+static bool GetOffsetsForFile(const char *filename, struct version *output) // WinAPI syntax and naming schemes.
+{
+    bool retval = false;
+    DWORD versionhandle = 0;
+    DWORD versionsize = GetFileVersionInfoSize(filename, &versionhandle);
+    if(versionsize == 0)
+    {
+        printf("Err: GetOffsetsForGlide failed at GetFileVersionInfoSize. %lu\n", GetLastError());
+        printf("   : https://docs.microsoft.com/en-us/windows/win32/debug/system-error-codes\n"); // TODO: API lookup error code handling.
+        goto GetOffsetsForGlide_dead;
+    }
+    LPSTR versionbuffer = malloc(versionsize);
+    if(versionbuffer == NULL)
+    {
+        printf("Err: GetOffsetsForGlide failed at malloc for versionbuffer with %lu bytes.\n", versionsize);
+        goto GetOffsetsForGlide_dead;
+    }
+    if(GetFileVersionInfo(filename, versionhandle, versionsize, versionbuffer) == FALSE)
+    {
+        printf("Err: GetOffsetsForGlide failed at GetFileVersionInfo.\n");
+        goto GetOffsetsForGlide_buffer;
+    }
+    LPBYTE buffer = NULL;
+    UINT buffersize = 0;
+    if(VerQueryValue(versionbuffer, "\\", (LPVOID *)&buffer, &buffersize) == FALSE)
+    {
+        printf("Err: GetOffsetsForGlide failed at VerQueryValue.\n");
+        goto GetOffsetsForGlide_buffer;
+    }
+    if(buffersize == 0)
+    {
+        printf("Err: GetOffsetsForGlide failed at VerQueryValue, version data size is zero.\n");
+        goto GetOffsetsForGlide_buffer;
+    }
+    VS_FIXEDFILEINFO *versioninfo = (VS_FIXEDFILEINFO *)buffer;
+    if(versioninfo->dwSignature != 0xFEEF04BD)
+    {
+        printf("Err: GetOffsetsForGlide failed at VerQueryValue, version info signature is not valid. %08X\n", versioninfo->dwSignature);
+        goto GetOffsetsForGlide_buffer;
+    }
+    output->v1 = HIWORD(versioninfo->dwFileVersionMS);
+    output->v2 = LOWORD(versioninfo->dwFileVersionMS);
+    output->v3 = HIWORD(versioninfo->dwFileVersionLS);
+    output->v4 = LOWORD(versioninfo->dwFileVersionLS);
+    retval = true;
+GetOffsetsForGlide_buffer:
+    free(versionbuffer);
+    versionbuffer = NULL;
+GetOffsetsForGlide_dead:
+    return retval;
+}
+static bool GetOffsets()
+{
+    bool gooddll = false;
+    bool goodexe = false;
+    struct version v;
+    if(GetOffsetsForFile(GLIDEDLL, &v) == false)
+    {
+        goto GetOffsets_dead;
+    }
+    if(v.v1 == 1 && v.v2 == 4 && v.v3 == 4 && v.v4 == 21) // Sven's 1.4e
+    {
+        printf("DLL %d.%d.%d.%d == Sven's 1.4e detected.\n", v.v1, v.v2, v.v3, v.v4);
+        Offset_dll_width = 0x7DF8;
+        Offset_dll_height = 0x7E04;
+        gooddll = true;
+    }
+    else if(v.v1 == 1 && v.v2 == 4 && v.v3 == 6 && v.v4 == 1) // D2SE's edited
+    {
+        printf("DLL %d.%d.%d.%d == D2SE's edited 1.4e detected.\n", v.v1, v.v2, v.v3, v.v4);
+        Offset_dll_width = 0x8048;
+        Offset_dll_height = 0x8054;
+        gooddll = true;
+    }
+    if(gooddll == false)
+    {
+        printf("Err: GetOffsets failed for DLL, unknown version.\n");
+        printf("   : %d.%d.%d.%d\n", v.v1, v.v2, v.v3, v.v4);
+    }
+    if(GetOffsetsForFile(GLIDEEXE, &v) == false)
+    {
+        goto GetOffsets_dead;
+    }
+    if(v.v1 == 2 && v.v2 == 0 && v.v3 == 1 && v.v4 == 24) // Sven's 1.4e
+    {
+        printf("EXE %d.%d.%d.%d == Sven's 1.4e detected.\n", v.v1, v.v2, v.v3, v.v4);
+        Offset_exe = 0x1890A;
+        Size_exe = 10;
+        goodexe = true;
+    }
+    if(goodexe == false)
+    {
+        printf("Err: GetOffsets failed for EXE, unknown version.\n");
+        printf("   : %d.%d.%d.%d\n", v.v1, v.v2, v.v3, v.v4);
+    }
+    printf("\n");
+GetOffsets_dead:
+    return gooddll && goodexe;
+}
 
 static bool GetResolutionFromUser(char *buffer, size_t buffersize, uint32_t *width, uint32_t *height)
 {
@@ -66,17 +179,21 @@ static void PrintMissingFile(const char *filename)
 
 int main(int argc, char **argv)
 {
-    char buffer[12];
-    FILE *glide_dll = fopen("glide3x.dll", "r+");
-    if(glide_dll == NULL)
+    if(GetOffsets() == false)
     {
-        PrintMissingFile("glide3x.dll");
         goto main_dead;
     }
-    FILE *glide_exe = fopen("glide-init.exe", "r+");
+    char buffer[12];
+    FILE *glide_dll = fopen(GLIDEDLL, "r+");
+    if(glide_dll == NULL)
+    {
+        PrintMissingFile(GLIDEDLL);
+        goto main_dead;
+    }
+    FILE *glide_exe = fopen(GLIDEEXE, "r+");
     if(glide_exe == NULL)
     {
-        PrintMissingFile("glide-init.exe");
+        PrintMissingFile(GLIDEEXE);
         goto main_dll;
     }
     uint32_t width, height;
